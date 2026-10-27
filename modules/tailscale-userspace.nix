@@ -2,7 +2,8 @@
 
 # Userspace Tailscale for the Grok Bot box (no systemd / no /dev/net/tun).
 # - ensure-tailscale: idempotent daemon start (SOCKS5 + HTTP proxy on 127.0.0.1:1055)
-# - ts-run: run ONE command with ALL_PROXY/HTTP(S)_PROXY set (never export globally)
+# - ts-run: run ONE command with ALL_PROXY=socks5h (never export globally)
+# - t3: curl Venkat-MBP Tailscale Serve → local T3 (FQDN, via ts-run)
 # Join the tailnet separately: ensure-tailscale up  (login URL or --auth-key=...)
 let
   socksAddr = "127.0.0.1:1055";
@@ -92,17 +93,45 @@ let
       set -euo pipefail
       if [[ "$#" -lt 1 ]]; then
         echo "usage: ts-run <command> [args...]" >&2
-        echo "Runs a command with Tailscale userspace SOCKS/HTTP proxies set." >&2
+        echo "Runs a command with Tailscale userspace SOCKS5 (ALL_PROXY=socks5h)." >&2
+        echo "Use MagicDNS FQDNs (host.tail….ts.net), not short names — Serve certs are FQDN-only." >&2
         exit 2
       fi
       ensure-tailscale ensure
-      # SOCKS5 only. Do not set HTTP(S)_PROXY: curl prefers those and uses
-      # HTTP CONNECT, which hangs against Tailscale's userspace HTTP proxy.
+      # SOCKS5h: Tailscale resolves MagicDNS. Do not set HTTP(S)_PROXY (CONNECT hangs).
+      # Avoid short hostnames: this box's system DNS maps *.ts.net to a fake 198.18.0.1.
       export ALL_PROXY="${socksUrl}"
       unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy || true
       export NO_PROXY="localhost,127.0.0.1,::1"
       export no_proxy="$NO_PROXY"
       exec "$@"
+    '';
+  };
+
+  # Ergonomic T3 Serve client: https://venkat-mbp.<tailnet>.ts.net via ts-run.
+  # Override with T3_SERVE_URL if the hostname ever changes.
+  t3 = pkgs.writeShellApplication {
+    name = "t3";
+    runtimeInputs = [
+      ts-run
+      pkgs.curl
+      pkgs.coreutils
+    ];
+    text = ''
+      set -euo pipefail
+      base="''${T3_SERVE_URL:-https://venkat-mbp.taila781d4.ts.net}"
+      base="''${base%/}"
+      if [[ "$#" -eq 0 ]]; then
+        path="/"
+      else
+        path="$1"
+        shift
+        if [[ "$path" != /* ]]; then
+          path="/$path"
+        fi
+      fi
+      # -k: Serve presents a Let's Encrypt cert; keep it simple on the box.
+      exec ts-run curl -skS --max-time 30 "$@" "''${base}''${path}"
     '';
   };
 in
@@ -111,5 +140,6 @@ in
     pkgs.tailscale
     ensure-tailscale
     ts-run
+    t3
   ];
 }

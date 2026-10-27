@@ -85,8 +85,12 @@ This box has no systemd (PID 1 is `tini`). Tailscale runs in userspace mode:
 
 - `ensure-tailscale` — idempotent start of `tailscaled --tun=userspace-networking`
   with a **localhost-only** SOCKS5/HTTP proxy on `127.0.0.1:1055`
-- `ts-run <cmd…>` — runs one command with `ALL_PROXY` / `HTTP(S)_PROXY` set
-  (never export those globally in `bashrc` / sessionVariables)
+- `ts-run <cmd…>` — one command with `ALL_PROXY=socks5h://127.0.0.1:1055`
+  (never export proxies globally). Prefer MagicDNS **FQDNs**
+  (`host.tail….ts.net`); short names break Serve TLS, and this box’s
+  system DNS maps `*.ts.net` to a fake `198.18.0.1`.
+- `t3 [path] [curl args…]` — curl Venkat-MBP Tailscale Serve → local T3
+  (default `T3_SERVE_URL=https://venkat-mbp.taila781d4.ts.net`)
 - State: `~/.local/state/tailscale/`
 - Shell hook: interactive `~/.bashrc` (nix / home-manager marked block) runs
   `ensure-tailscale ensure` in the background only
@@ -94,8 +98,13 @@ This box has no systemd (PID 1 is `tini`). Tailscale runs in userspace mode:
 ```sh
 ensure-tailscale status
 ensure-tailscale up                    # login URL, or --auth-key=tskey-...
-ts-run curl -sS https://venkat-mbp.taila781d4.ts.net/   # example Serve URL
+t3                                     # GET Serve /  (expect 200 HTML from T3)
+t3 / -o /dev/null -w '%{http_code}\n'
+ts-run curl -skS https://venkat-mbp.taila781d4.ts.net/
 ```
+
+Tailnet ACL must allow `pepe-box` (`100.116.189.18`) → `venkat-mbp` `tcp:443`
+(MagicDNS names are not valid ACL selectors unless listed under `hosts`).
 
 Joining the tailnet is a separate auth step. After a box recreate, re-run
 `home-manager switch` from this flake and authenticate again.
