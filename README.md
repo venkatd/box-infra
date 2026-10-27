@@ -75,6 +75,29 @@ Pre-Nix copies: `~/.profile.pre-nix`, `~/.bashrc.pre-nix`.
 
 In a project: `echo "use flake" > .envrc && direnv allow` (nix-direnv caches the dev shell).
 
+
+## Tailscale (userspace, no systemd)
+
+This box has no systemd (PID 1 is `tini`). Tailscale is installed via Nix and kept
+up by an idempotent helper instead of a service unit:
+
+- Package: `tailscale` + `ensure-tailscale` in `home.nix`
+- State: `~/.local/state/tailscale/` (socket, state, log)
+- Mode: `tailscaled --tun=userspace-networking` (no `/dev/net/tun` / root needed)
+- Shell hook: interactive `~/.bashrc` (inside the nix / home-manager marked block)
+  runs `ensure-tailscale ensure` in the background
+
+Useful commands:
+
+```sh
+ensure-tailscale status
+ensure-tailscale up --auth-key=tskey-...   # or omit key for a login URL
+ensure-tailscale down
+```
+
+Joining the tailnet is a separate auth step (auth key or browser login). After a
+box recreate, re-run `home-manager switch` from this flake and authenticate again.
+
 ## Notes
 
 - No systemd on this box: home-manager prints "User systemd daemon not running. Skipping reload." — harmless.
