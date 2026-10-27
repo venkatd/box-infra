@@ -96,12 +96,10 @@ let
         exit 2
       fi
       ensure-tailscale ensure
+      # SOCKS5 only. Do not set HTTP(S)_PROXY: curl prefers those and uses
+      # HTTP CONNECT, which hangs against Tailscale's userspace HTTP proxy.
       export ALL_PROXY="${socksUrl}"
-      export HTTP_PROXY="${httpProxyUrl}"
-      export HTTPS_PROXY="${httpProxyUrl}"
-      export http_proxy="${httpProxyUrl}"
-      export https_proxy="${httpProxyUrl}"
-      # Do not proxy loopback / clear nonsense for local tools.
+      unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy || true
       export NO_PROXY="localhost,127.0.0.1,::1"
       export no_proxy="$NO_PROXY"
       exec "$@"
