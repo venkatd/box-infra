@@ -121,7 +121,8 @@ let
       set -euo pipefail
       base="''${T3_SERVE_URL:-https://venkat-mbp.taila781d4.ts.net}"
       base="''${base%/}"
-      if [[ "$#" -eq 0 ]]; then
+      # path first unless the first arg is a curl flag (e.g. t3 -o /dev/null -w '%{http_code}\n')
+      if [[ "$#" -eq 0 || "''${1:-}" == -* ]]; then
         path="/"
       else
         path="$1"
