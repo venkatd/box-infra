@@ -78,25 +78,28 @@ In a project: `echo "use flake" > .envrc && direnv allow` (nix-direnv caches the
 
 ## Tailscale (userspace, no systemd)
 
-This box has no systemd (PID 1 is `tini`). Tailscale is installed via Nix and kept
-up by an idempotent helper instead of a service unit:
+Declared in [`modules/tailscale-userspace.nix`](modules/tailscale-userspace.nix)
+(imported from `home.nix`), not as ad-hoc startup lines in the flake.
 
-- Package: `tailscale` + `ensure-tailscale` in `home.nix`
-- State: `~/.local/state/tailscale/` (socket, state, log)
-- Mode: `tailscaled --tun=userspace-networking` (no `/dev/net/tun` / root needed)
-- Shell hook: interactive `~/.bashrc` (inside the nix / home-manager marked block)
-  runs `ensure-tailscale ensure` in the background
+This box has no systemd (PID 1 is `tini`). Tailscale runs in userspace mode:
 
-Useful commands:
+- `ensure-tailscale` — idempotent start of `tailscaled --tun=userspace-networking`
+  with a **localhost-only** SOCKS5/HTTP proxy on `127.0.0.1:1055`
+- `ts-run <cmd…>` — runs one command with `ALL_PROXY` / `HTTP(S)_PROXY` set
+  (never export those globally in `bashrc` / sessionVariables)
+- State: `~/.local/state/tailscale/`
+- Shell hook: interactive `~/.bashrc` (nix / home-manager marked block) runs
+  `ensure-tailscale ensure` in the background only
 
 ```sh
 ensure-tailscale status
-ensure-tailscale up --auth-key=tskey-...   # or omit key for a login URL
-ensure-tailscale down
+ensure-tailscale up                    # login URL, or --auth-key=tskey-...
+ts-run curl -sS https://venkat-mbp.taila781d4.ts.net/   # example Serve URL
 ```
 
-Joining the tailnet is a separate auth step (auth key or browser login). After a
-box recreate, re-run `home-manager switch` from this flake and authenticate again.
+Joining the tailnet is a separate auth step. After a box recreate, re-run
+`home-manager switch` from this flake and authenticate again.
+
 
 ## Notes
 

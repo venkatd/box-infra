@@ -1,72 +1,8 @@
 { pkgs, ... }:
 
-let
-  ensure-tailscale = pkgs.writeShellApplication {
-    name = "ensure-tailscale";
-    runtimeInputs = with pkgs; [
-      tailscale
-      coreutils
-      util-linux # flock
-      procps # pgrep
-    ];
-    text = ''
-      # Idempotent: start userspace tailscaled if it isn't already up.
-      # No systemd on this box (PID 1 is tini); join the tailnet separately
-      # with: ensure-tailscale up --auth-key=tskey-...
-      set -euo pipefail
-
-      STATE_DIR="''${XDG_STATE_HOME:-$HOME/.local/state}/tailscale"
-      SOCKET="$STATE_DIR/tailscaled.sock"
-      STATE="$STATE_DIR/tailscaled.state"
-      LOG="$STATE_DIR/tailscaled.log"
-      LOCK="$STATE_DIR/ensure.lock"
-      mkdir -p "$STATE_DIR"
-
-      # Pass-through: `ensure-tailscale up ...` / `status` / etc.
-      if [[ "''${1:-}" != "" && "''${1:-}" != "ensure" ]]; then
-        # Make sure the daemon is up first for CLI subcommands.
-        if [[ ! -S "$SOCKET" ]] || ! tailscale --socket="$SOCKET" status >/dev/null 2>&1; then
-          "$0" ensure
-        fi
-        exec tailscale --socket="$SOCKET" "$@"
-      fi
-
-      # Fast path: already healthy.
-      if [[ -S "$SOCKET" ]] && tailscale --socket="$SOCKET" status >/dev/null 2>&1; then
-        exit 0
-      fi
-
-      exec 9>"$LOCK"
-      if ! flock -n 9; then
-        # Another ensure is starting the daemon.
-        for _ in $(seq 1 50); do
-          if [[ -S "$SOCKET" ]] && tailscale --socket="$SOCKET" status >/dev/null 2>&1; then
-            exit 0
-          fi
-          sleep 0.1
-        done
-        exit 0
-      fi
-
-      if ! pgrep -f "tailscaled --socket=$SOCKET" >/dev/null 2>&1; then
-        nohup tailscaled \
-          --tun=userspace-networking \
-          --state="$STATE" \
-          --socket="$SOCKET" \
-          --port=0 \
-          >>"$LOG" 2>&1 &
-      fi
-
-      for _ in $(seq 1 50); do
-        if [[ -S "$SOCKET" ]]; then
-          break
-        fi
-        sleep 0.1
-      done
-    '';
-  };
-in
 {
+  imports = [ ./modules/tailscale-userspace.nix ];
+
   home.username = "box";
   home.homeDirectory = "/home/box";
 
@@ -89,8 +25,6 @@ in
     htop
     tmux
     nixfmt
-    tailscale
-    ensure-tailscale
   ];
 
   # direnv + nix-direnv (writes ~/.config/direnv/direnvrc).
