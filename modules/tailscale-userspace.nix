@@ -3,7 +3,8 @@
 # Userspace Tailscale for the Grok Bot box (no systemd / no /dev/net/tun).
 # - ensure-tailscale: idempotent daemon start (SOCKS5 + HTTP proxy on 127.0.0.1:1055)
 # - ts-run: run ONE command with ALL_PROXY=socks5h (never export globally)
-# - t3: curl Venkat-MBP Tailscale Serve → local T3 (FQDN, via ts-run)
+# The real T3 Code CLI/server lives in ./t3-server.nix (the old curl `t3`
+# wrapper to Venkat-MBP Serve was dropped in favour of T3 Linked environments).
 # Join the tailnet separately: ensure-tailscale up  (login URL or --auth-key=...)
 let
   socksAddr = "127.0.0.1:1055";
@@ -17,6 +18,7 @@ let
       coreutils
       util-linux # flock
       procps # pgrep
+      jq
     ];
     text = ''
       set -euo pipefail
@@ -40,7 +42,7 @@ let
           --port=0 \
           --socks5-server="$SOCKS" \
           --outbound-http-proxy-listen="$SOCKS" \
-          >>"$LOG" 2>&1 &
+          >>"$LOG" 2>&1 9>&- &
         for _ in $(seq 1 50); do
           if [[ -S "$SOCKET" ]]; then
             break
@@ -60,11 +62,22 @@ let
       # Fast path: daemon up and SOCKS listening.
       if [[ -S "$SOCKET" ]] && tailscale --socket="$SOCKET" status >/dev/null 2>&1; then
         if (echo >/dev/tcp/127.0.0.1/1055) >/dev/null 2>&1; then
-          exit 0
+          # Self-heal: after box sleep/migration the daemon can stay up while its
+          # control long-poll is dead (Self.Online=false, "no network map").
+          if tailscale --socket="$SOCKET" status --json 2>/dev/null | jq -e '.Self.Online == true' >/dev/null; then
+            exit 0
+          fi
+          if ! tailscale --socket="$SOCKET" status 2>/dev/null | grep -q "network map from the coordination server"; then
+            exit 0
+          fi
         fi
-        # Status ok but SOCKS missing (old daemon): restart with SOCKS flags.
+        # SOCKS missing (old daemon) or control plane lost: restart cleanly.
         pkill -f "tailscaled --socket=$SOCKET" >/dev/null 2>&1 || true
-        sleep 0.3
+        for _ in $(seq 1 50); do
+          pgrep -f "tailscaled --socket=$SOCKET" >/dev/null 2>&1 || break
+          sleep 0.1
+        done
+        pkill -9 -f "tailscaled --socket=$SOCKET" >/dev/null 2>&1 || true
       fi
 
       exec 9>"$LOCK"
@@ -108,39 +121,11 @@ let
     '';
   };
 
-  # Ergonomic T3 Serve client: https://venkat-mbp.<tailnet>.ts.net via ts-run.
-  # Override with T3_SERVE_URL if the hostname ever changes.
-  t3 = pkgs.writeShellApplication {
-    name = "t3";
-    runtimeInputs = [
-      ts-run
-      pkgs.curl
-      pkgs.coreutils
-    ];
-    text = ''
-      set -euo pipefail
-      base="''${T3_SERVE_URL:-https://venkat-mbp.taila781d4.ts.net}"
-      base="''${base%/}"
-      # path first unless the first arg is a curl flag (e.g. t3 -o /dev/null -w '%{http_code}\n')
-      if [[ "$#" -eq 0 || "''${1:-}" == -* ]]; then
-        path="/"
-      else
-        path="$1"
-        shift
-        if [[ "$path" != /* ]]; then
-          path="/$path"
-        fi
-      fi
-      # -k: Serve presents a Let's Encrypt cert; keep it simple on the box.
-      exec ts-run curl -skS --max-time 30 "$@" "''${base}''${path}"
-    '';
-  };
 in
 {
   home.packages = [
     pkgs.tailscale
     ensure-tailscale
     ts-run
-    t3
   ];
 }

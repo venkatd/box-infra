@@ -1,7 +1,10 @@
 { pkgs, ... }:
 
 {
-  imports = [ ./modules/tailscale-userspace.nix ];
+  imports = [
+    ./modules/tailscale-userspace.nix
+    ./modules/t3-server.nix
+  ];
 
   home.username = "box";
   home.homeDirectory = "/home/box";
